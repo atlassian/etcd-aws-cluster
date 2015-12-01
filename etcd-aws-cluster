@@ -31,7 +31,6 @@ if [[ ! $ec2_instance_ip ]]; then
     exit 3
 fi
 
-# If we're in proxy mode we don't have to look this up and expect an env var
 if [[ ! $PROXY_ASG ]]; then
     etcd_proxy=off
     asg_name=$(aws autoscaling describe-auto-scaling-groups --region $region | jq --raw-output ".[] | map(select(.Instances[].InstanceId | contains(\"$ec2_instance_id\"))) | .[].AutoScalingGroupName")
@@ -41,17 +40,17 @@ if [[ ! $PROXY_ASG ]]; then
     fi
 else
     etcd_proxy=on
-    asg_name=$PROXY_ASG
+    asg_name=$(aws ec2 describe-tags --filters "Name=key,Values=etcd-asg,Name=resource-type,Values=instance,Name=resource-id,Values=$ec2_instance_id" --region $region | jq --raw-output '.Tags[] | select(.Key == "etcd-asg") | .Value')
 fi
+echo "asg_name=$asg_name"
 
 etcd_client_scheme=${ETCD_CLIENT_SCHEME:-http}
-echo "client_client_scheme=$etcd_client_scheme"
+echo "etcd_client_scheme=$etcd_client_scheme"
 
 etcd_peer_scheme=${ETCD_PEER_SCHEME:-http}
-echo "peer_peer_scheme=$etcd_peer_scheme"
+echo "etcd_peer_scheme=$etcd_peer_scheme"
 
 etcd_peer_urls=$(aws ec2 describe-instances --region $region --instance-ids $(aws autoscaling describe-auto-scaling-groups --region $region --auto-scaling-group-name $asg_name | jq '.AutoScalingGroups[0].Instances[] | select(.LifecycleState  == "InService") | .InstanceId' | xargs) | jq -r ".Reservations[].Instances | map(\"$etcd_client_scheme://\" + .NetworkInterfaces[].PrivateIpAddress + \":2379\")[]")
-
 if [[ ! $etcd_peer_urls ]]; then
     echo "$pkg: unable to find members of auto scaling group"
     exit 5
@@ -160,6 +159,7 @@ else
 ETCD_INITIAL_CLUSTER_STATE=new
 ETCD_NAME=$ec2_instance_id
 ETCD_INITIAL_CLUSTER="$etcd_initial_cluster"
+ETCD_PROXY=$etcd_proxy
 EOF
 fi
 
